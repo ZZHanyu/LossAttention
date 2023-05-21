@@ -8,6 +8,20 @@ from model import Model
 import scipy.sparse as sp
 import math
 
+# define attention model and init the model
+class AttentionModel(torch.nn.Module):
+    def __init__(self):
+        super(AttentionModel, self).__init__()
+        self.attention_weights = torch.nn.Parameter(torch.Tensor([0.5, 0.5]))  # 初始化注意力权重
+
+    def forward(self, loss_A, loss_B):
+        weighted_loss = self.attention_weights[0] * loss_A + self.attention_weights[1] * loss_B
+        return weighted_loss
+
+    def get_attention_weight(self):
+        return self.attention_weights
+
+
 
 class UltraGCNNet(torch.nn.Module):
     def __init__(self, ds, args, logging, mask=None, has_bias=True):
@@ -173,8 +187,32 @@ class UltraGCNNet(torch.nn.Module):
         # variant emb
         self.var_emb = torch.cat((self.V, feat_var),dim=1)
 
-        # loss mixed
-        loss = (self.loss_L(uid, iid, niid) + self.loss_E(uid, iid, niid)) / 2 + self.regs(uid, iid, niid)
+        # 定义attentionmodel实例：
+        attention_model = AttentionModel()
+        optimizer = torch.optim.Adam(attention_model.parameters(), lr=0.001)
+
+        # Attention model train
+        for epoch in tqdm(range(100)):
+            # 模型A前向传播和计算损失
+            loss_A = self.loss_L(uid, iid, niid)
+
+            # 模型B前向传播和计算损失
+            loss_B = self.loss_E(uid, iid, niid)
+
+            # 计算加权损失
+            weighted_loss = attention_model(loss_A, loss_B)
+
+            # 优化注意力模型
+            optimizer.zero_grad()
+            weighted_loss.backward()
+            optimizer.step()
+
+            self.logging.info(f"Epoch {epoch + 1}: Weighted Loss: {weighted_loss.item()}")
+
+        attention_weight = torch.tensor(attention_model.get_attention_weight())
+        self.logging.info(f"Attention weight(1) = {attention_weight[0]}\n Attention weight(2) = {attention_weight[1]}\n")
+
+        loss = (attention_weight[0] * self.loss_L(uid, iid, niid) + attention_weight[1] * self.loss_E(uid, iid, niid)) + self.regs(uid, iid, niid)
 
         return loss
 
