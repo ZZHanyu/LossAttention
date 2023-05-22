@@ -178,7 +178,7 @@ class UltraGCNNet(torch.nn.Module):
         # invariant feat
         feat = feat * self.mask
         # identify variant feat
-        feat_var = feat * (torch.ones(self.mask) - self.mask)
+        feat_var = feat * (torch.ones(self.mask.shape) - self.mask)
         if fs is not None:
             feat = fs(feat)
         feat = self.MLP(feat)
@@ -186,6 +186,7 @@ class UltraGCNNet(torch.nn.Module):
         self.item_emb = torch.cat((self.V, feat), dim=1)
         # variant emb
         self.var_emb = torch.cat((self.V, feat_var),dim=1)
+        self.var_meb = torch.nn.AdaptiveMaxPool2d((128, 128))
 
         # 定义attentionmodel实例：
         attention_model = AttentionModel()
@@ -204,14 +205,13 @@ class UltraGCNNet(torch.nn.Module):
 
             # 优化注意力模型
             optimizer.zero_grad()
-            weighted_loss.backward()
+            weighted_loss.backward(retain_graph=True)
             optimizer.step()
 
             self.logging.info(f"Epoch {epoch + 1}: Weighted Loss: {weighted_loss.item()}")
-
+        
         attention_weight = torch.tensor(attention_model.get_attention_weight())
         self.logging.info(f"Attention weight(1) = {attention_weight[0]}\n Attention weight(2) = {attention_weight[1]}\n")
-
         loss = (attention_weight[0] * self.loss_L(uid, iid, niid) + attention_weight[1] * self.loss_E(uid, iid, niid)) + self.regs(uid, iid, niid)
 
         return loss
@@ -222,6 +222,14 @@ class UltraGCNNet(torch.nn.Module):
         if flag:
             return torch.sum(self.user_emb[uid].unsqueeze(1) * self.item_emb[iid], dim=2)
         return torch.sum(self.user_emb[uid] * self.item_emb[iid], dim=1)
+
+    
+    def predict_erm(self, uid, iid, flag=False):
+        if self.user_emb is None:
+            return None
+        if flag:
+            return torch.sum(self.user_emb[uid].unsqueeze(1) * self.var_emb[iid], dim=2)
+        return torch.sum(self.user_emb[uid] * self.var_emb[iid], dim=1)
 
 
 def setup_seed(seed):
