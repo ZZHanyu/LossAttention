@@ -8,20 +8,6 @@ from model import Model
 import scipy.sparse as sp
 import math
 
-# define attention model and init the model
-class AttentionModel(torch.nn.Module):
-    def __init__(self):
-        super(AttentionModel, self).__init__()
-        self.attention_weights = torch.nn.Parameter(torch.Tensor([0.5, 0.5]))  # 初始化注意力权重
-
-    def forward(self, loss_A, loss_B):
-        weighted_loss = self.attention_weights[0] * loss_A + self.attention_weights[1] * loss_B
-        return weighted_loss
-
-    def get_attention_weight(self):
-        return self.attention_weights
-
-
 
 class UltraGCNNet(torch.nn.Module):
     def __init__(self, ds, args, logging, mask=None, has_bias=True):
@@ -144,6 +130,7 @@ class UltraGCNNet(torch.nn.Module):
 
         return loss
 
+
     def regs(self, uid, iid, niid):
         lr1, wd1 = self.args.p_emb
         lr2, wd2 = self.args.p_proj
@@ -175,46 +162,21 @@ class UltraGCNNet(torch.nn.Module):
             feat = torch.cat((feat, self.a_feat), dim=1)
         if self.t_feat is not None:
             feat = torch.cat((feat, self.t_feat), dim=1)
-        # invariant feat
         feat = feat * self.mask
-        # identify variant feat
-        feat_var = feat * (torch.ones(self.mask.shape) - self.mask)
+        # define varient feature:
+        feat_var = feat * (torch.ones(self.mask.shape).to(self.args.device) - self.mask.to(self.args.device)).to(self.args.device)
         if fs is not None:
             feat = fs(feat)
         feat = self.MLP(feat)
-        # invariant emb
         self.item_emb = torch.cat((self.V, feat), dim=1)
         # variant emb
         self.var_emb = torch.cat((self.V, feat_var),dim=1)
-        self.var_meb = torch.nn.AdaptiveMaxPool2d((128, 128))
+        self.var_emb = torch.nn.AdaptiveMaxPool2d((128, 128))
 
-        # 定义attentionmodel实例：
-        attention_model = AttentionModel()
-        optimizer = torch.optim.Adam(attention_model.parameters(), lr=0.001)
+        loss_i = self.loss_L(uid, iid, niid) + self.regs(uid, iid, niid)
+        loss_e = self.loss_E(uid, iid, niid) + self.regs(uid, iid, niid)
 
-        # Attention model train
-        for epoch in tqdm(range(100)):
-            # 模型A前向传播和计算损失
-            loss_A = self.loss_L(uid, iid, niid)
-
-            # 模型B前向传播和计算损失
-            loss_B = self.loss_E(uid, iid, niid)
-
-            # 计算加权损失
-            weighted_loss = attention_model(loss_A, loss_B)
-
-            # 优化注意力模型
-            optimizer.zero_grad()
-            weighted_loss.backward(retain_graph=True)
-            optimizer.step()
-
-            self.logging.info(f"Epoch {epoch + 1}: Weighted Loss: {weighted_loss.item()}")
-        
-        attention_weight = torch.tensor(attention_model.get_attention_weight())
-        self.logging.info(f"Attention weight(1) = {attention_weight[0]}\n Attention weight(2) = {attention_weight[1]}\n")
-        loss = (attention_weight[0] * self.loss_L(uid, iid, niid) + attention_weight[1] * self.loss_E(uid, iid, niid)) + self.regs(uid, iid, niid)
-
-        return loss
+        return loss_i, loss_e
 
     def predict(self, uid, iid, flag=False):
         if self.user_emb is None:
@@ -223,7 +185,6 @@ class UltraGCNNet(torch.nn.Module):
             return torch.sum(self.user_emb[uid].unsqueeze(1) * self.item_emb[iid], dim=2)
         return torch.sum(self.user_emb[uid] * self.item_emb[iid], dim=1)
 
-    
     def predict_erm(self, uid, iid, flag=False):
         if self.user_emb is None:
             return None
