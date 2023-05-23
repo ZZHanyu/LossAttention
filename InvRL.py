@@ -15,7 +15,7 @@ def setup_seed(seed):
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     torch.backends.cudnn.deterministic = True
-
+        
 
 class FrontModel(torch.nn.Module):
     def __init__(self, ds, args, logging):
@@ -80,6 +80,8 @@ class FrontModel(torch.nn.Module):
 
 class FeatureSelector(torch.nn.Module):
     def __init__(self, input_dim, sigma, args):
+        # input dim = mask shape
+        # 
         super().__init__()
         setup_seed(2233)
         self.args = args
@@ -200,6 +202,7 @@ class InvRL(Model):
         grad_single = grad(loss_single, self.backmodel.MLP.weight, create_graph=True)[0]
         return loss_single, grad_single
 
+    # IRM loss + penalty
     def loss_p(self, loss_avg, grad_avg, grad_list):
         penalty = torch.zeros_like(grad_avg).to(self.args.device)
         for gradient in grad_list:
@@ -293,7 +296,8 @@ class InvRL(Model):
         self.logging.info('mask %s' % mask)
         self.args.p_emb = self.args.p_embp
         self.args.p_proj = self.args.p_ctx
-        self.net = UltraGCNNet(self.ds, self.args, self.logging, mask.cpu()).to(self.args.device)
+        self.net = UltraGCNNet(self.ds, self.args, self.logging, mask).to(self.args.device)
+
 
         if self.args.dataset == 'tiktok':
             self.init_word_emb(self.net)
@@ -323,8 +327,7 @@ class InvRL(Model):
                     break
                 uid, iid, niid = uid.to(self.args.device), iid.to(self.args.device), niid.to(self.args.device)
 
-                loss = self.net(uid, iid, niid)
-
+                
                 loss.backward()
                 optimizer.step()
                 optimizer2.step()
