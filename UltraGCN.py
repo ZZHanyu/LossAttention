@@ -8,6 +8,18 @@ from model import Model
 import scipy.sparse as sp
 import math
 
+# define attention model and init the model
+class AttentionModel(torch.nn.Module):
+    def __init__(self):
+        super(AttentionModel, self).__init__()
+        self.attention_weights = torch.nn.Parameter(torch.Tensor([0.5, 0.5]))  # 初始化注意力权重
+
+    def forward(self, loss_A, loss_B):
+        weighted_loss = self.attention_weights[0] * loss_A + self.attention_weights[1] * loss_B
+        return weighted_loss
+
+    def get_attention_weight(self):
+        return self.attention_weights
 
 class UltraGCNNet(torch.nn.Module):
     def __init__(self, ds, args, logging, mask=None, has_bias=True):
@@ -56,6 +68,7 @@ class UltraGCNNet(torch.nn.Module):
 
         self.user_emb = None
         self.item_emb = None
+        self.var_emb = None
         self.word_emb = None
         self.num_word = None
         self.word_mat = None
@@ -118,8 +131,8 @@ class UltraGCNNet(torch.nn.Module):
     def loss_E(self, uid, iid, niid):
         beta_p, beta_n = self.cal_weight(uid, iid, niid)
 
-        pred_p = self.predict(uid, iid)
-        pred_n = self.predict(uid, niid, True)
+        pred_p = self.predict_erm(uid, iid)
+        pred_n = self.predict_erm(uid, niid, True)
         label_p = torch.ones(pred_p.size()).to(self.args.device)
         label_n = torch.zeros(pred_n.size()).to(self.args.device)
 
@@ -162,16 +175,21 @@ class UltraGCNNet(torch.nn.Module):
             feat = torch.cat((feat, self.a_feat), dim=1)
         if self.t_feat is not None:
             feat = torch.cat((feat, self.t_feat), dim=1)
-        feat = feat * self.mask
         # define varient feature:
         feat_var = feat * (torch.ones(self.mask.shape).to(self.args.device) - self.mask.to(self.args.device)).to(self.args.device)
+        feat = feat * self.mask
+
+        # The shape of feat = torch.Size([[76085, 64]])
+        # The shape of var_feat = torch.Size([76085, 384])
+
         if fs is not None:
             feat = fs(feat)
         feat = self.MLP(feat)
+        feat_var = self.MLP(feat_var)
         self.item_emb = torch.cat((self.V, feat), dim=1)
         # variant emb
-        self.var_emb = torch.cat((self.V, feat_var),dim=1)
-        self.var_emb = torch.nn.AdaptiveMaxPool2d((128, 128))
+        self.var_emb = torch.cat((self.V, feat_var), dim=1)
+        # The shape of var_feat = torch.Size([76085, 448])
 
         loss_i = self.loss_L(uid, iid, niid) + self.regs(uid, iid, niid)
         loss_e = self.loss_E(uid, iid, niid) + self.regs(uid, iid, niid)
@@ -231,6 +249,10 @@ class UltraGCN(Model):
         temp_id = torch.zeros(self.args.bsz, 2).type(torch.int64)
         temp_nid = torch.zeros(self.args.bsz, self.args.neg_num).type(torch.int64)
         self.net(temp_id[:, 0], temp_id[:, 1], temp_nid)
+        
+        # 定义attentionmodel实例：
+        attention_model = AttentionModel()
+        optimizer = torch.optim.Adam(attention_model.parameters(), lr=0.001)
 
         epochs = self.args.num_epoch
         val_max = 0.0
@@ -248,8 +270,19 @@ class UltraGCN(Model):
                     break
                 uid, iid, niid = uid.to(self.args.device), iid.to(self.args.device), niid.to(self.args.device)
 
-                loss = self.net(uid, iid, niid)
-
+                # Attention model train here
+                loss_A, loss_B = self.net(uid, iid, niid)
+                weighted_loss = attention_model(loss_A, loss_B)
+                
+                optimizer.zero_grad()
+                weighted_loss.backward(retain_graph=True)
+                optimizer.step()
+                self.logging.info(f"Epoch {epoch + 1}: Weighted Loss: {weighted_loss.item()}")
+                attention_weight =  attention_model.get_attention_weight().clone().detach().requires_grad_(True)
+                self.logging.info(f"Attention weight(1) = {attention_weight[0]}\n Attention weight(2) = {attention_weight[1]}\n")
+                loss = attention_weight[0] * loss_A + attention_weight[1] * loss_B
+                # attention train end here
+                
                 loss.backward()
                 optimizer.step()
                 optimizer2.step()
