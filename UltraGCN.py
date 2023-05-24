@@ -8,19 +8,6 @@ from model import Model
 import scipy.sparse as sp
 import math
 
-# define attention model and init the model
-class AttentionModel(torch.nn.Module):
-    def __init__(self):
-        super(AttentionModel, self).__init__()
-        self.attention_weights = torch.nn.Parameter(torch.Tensor([0.5, 0.5]))  # 初始化注意力权重
-
-    def forward(self, loss_A, loss_B):
-        weighted_loss = self.attention_weights[0] * loss_A + self.attention_weights[1] * loss_B
-        return weighted_loss
-
-    def get_attention_weight(self):
-        return self.attention_weights
-
 class UltraGCNNet(torch.nn.Module):
     def __init__(self, ds, args, logging, mask=None, has_bias=True):
         super().__init__()
@@ -65,10 +52,6 @@ class UltraGCNNet(torch.nn.Module):
 
         self.constraint_mat = None
         self.pre()
-
-        # Attention define:
-        self.attention_model = AttentionModel()
-        self.attention_weight = None
 
         self.user_emb = None
         self.item_emb = None
@@ -199,22 +182,11 @@ class UltraGCNNet(torch.nn.Module):
         loss_e = self.loss_E(uid, iid, niid) + self.regs(uid, iid, niid)
 
         # 定义attentionmodel实例：
-        optimizer = torch.optim.Adam(self.attention_model.parameters(), lr=0.001)
 
-        # Attention model train here
-        for epoch in range(100):
-            weighted_loss = self.attention_model(loss_i, loss_e)
-            optimizer.zero_grad()
-            weighted_loss.backward(retain_graph=True)
-            optimizer.step()
-            self.logging.info(f"Epoch {epoch + 1}: Weighted Loss: {weighted_loss.item()}")
-            self.attention_weight = self.attention_model.get_attention_weight().clone().detach().requires_grad_(True)
-            self.logging.info(f"Attention weight(1) = {self.attention_weight[0]}\n Attention weight(2) = {self.attention_weight[1]}\n")
-        # attention train end here
 
-        loss = self.attention_weight[0] * loss_i + self.attention_weight[1] * loss_e
+        # loss = self.attention_weight[0] * loss_i + self.attention_weight[1] * loss_e
 
-        return loss
+        return loss_i, loss_e
 
     def predict(self, uid, iid, flag=False):
         if self.user_emb is None:
