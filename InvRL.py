@@ -146,7 +146,7 @@ class InvRL(Model):
         self.backmodel = UltraGCNNet(self.ds, self.args, self.logging, has_bias=False).to(self.args.device)
         # Attention define:
         self.attention_model = AttentionModel()
-        self.attention_weight = None
+        self.attention_weight = [0.5, 0.5]
 
         self.net = None
 
@@ -214,7 +214,8 @@ class InvRL(Model):
 
     def single_forward(self, uid, iid, niid):
         assert self.fs.training is True
-        loss_single = (self.attention_weight[0] * (self.backmodel(uid, iid, niid, self.fs))[0] + self.attention_weight[1] * (self.backmodel(uid, iid, niid, self.fs))[1])
+        r1, r2 = self.backmodel(uid,iid,niid, self.fs)
+        loss_single = (self.attention_weight[0] * r1 + self.attention_weight[1] * r2)
         grad_single = grad(loss_single, self.backmodel.MLP.weight, create_graph=True)[0]
         return loss_single, grad_single
 

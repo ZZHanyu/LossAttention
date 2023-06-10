@@ -181,8 +181,6 @@ class UltraGCNNet(torch.nn.Module):
         loss_i = self.loss_L(uid, iid, niid) + self.regs(uid, iid, niid)
         loss_e = self.loss_E(uid, iid, niid) + self.regs(uid, iid, niid)
 
-        # 定义attentionmodel实例：
-
 
         # loss = self.attention_weight[0] * loss_i + self.attention_weight[1] * loss_e
 
@@ -257,8 +255,8 @@ class UltraGCN(Model):
                 if uid is None:
                     break
                 uid, iid, niid = uid.to(self.args.device), iid.to(self.args.device), niid.to(self.args.device)
-                loss = self.net(uid, iid, niid)
-                
+                re_array = self.net(uid, iid, niid)
+                loss = re_array[0] # loss = IRM loss
                 loss.backward()
                 optimizer.step()
                 optimizer2.step()
