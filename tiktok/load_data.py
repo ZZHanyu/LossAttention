@@ -30,7 +30,7 @@ class dataset:
         self.isz = np.int64(76085)
         self.dim = 64
         self.bsz = self.args.bsz
-        self.sz = int(self.train.shape[0] / 100)
+        self.sz = int(self.train.shape[0] / 50)
 
         # val & test
         for data in self.val:
